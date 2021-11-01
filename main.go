@@ -7,10 +7,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/Jeffail/gabs/v2"
-	"github.com/cheggaaa/pb/v3"
-	"github.com/tebeka/selenium"
-	"github.com/tebeka/selenium/chrome"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -18,15 +14,19 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Jeffail/gabs/v2"
+	"github.com/cheggaaa/pb/v3"
+	"github.com/tebeka/selenium"
+	"github.com/tebeka/selenium/chrome"
 )
 
 var JSESSIONID string
 var XSRFTOKEN string
 
-const FSusername = "user"
-const FSpassword = "password"
-const FSApplianceFQDN = "appliance.forescout.local"
-
+const FSusername = "admin"
+const FSpassword = "4Scout123"
+const FSApplianceFQDN = "192.168.1.252"
 
 func removeLines(fn string, start, n int) (err error) {
 	if start < 1 {
@@ -124,7 +124,7 @@ func FSLogin() {
 		log.Println(err)
 	}
 	defer wd.Quit()
-	
+
 	if err := wd.Get(fmt.Sprintf("https://%s/fsum/login", FSApplianceFQDN)); err != nil {
 		log.Fatal(err)
 	}
@@ -171,7 +171,6 @@ func GetDSTZones(zoneID string) []string {
 	var DSTZones []string
 	site := fmt.Sprintf("https://%s/seg/api/v2/matrix/0/policies/visualization?srcZoneId=%s", FSApplianceFQDN, zoneID)
 	method := "GET"
-
 
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
