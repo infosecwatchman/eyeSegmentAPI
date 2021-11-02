@@ -172,7 +172,7 @@ func FSLogin() {
 
 func ConnectTest() bool {
 
-	site := "https://forescout.scspa.local/seg/api/v1/environment/configuration"
+	site := fmt.Sprintf("https://%s/seg/api/v1/environment/configuration", FSApplianceFQDN)
 	method := "GET"
 
 	transport := &http.Transport{
