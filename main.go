@@ -11,22 +11,26 @@ import (
 	"github.com/cheggaaa/pb/v3"
 	"github.com/tebeka/selenium"
 	"github.com/tebeka/selenium/chrome"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
+	"golang.org/x/term"
+
 )
 
 var JSESSIONID string
 var XSRFTOKEN string
+var reUseBody io.ReadCloser
 
-const FSusername = "user"
-const FSpassword = "password"
-const FSApplianceFQDN = "appliance.forescout.local"
-
+var FSusername = "" //const FSusername = "user"
+var FSpassword = "" //const FSpassword = "password"
+var FSApplianceFQDN = "" //const FSApplianceFQDN = "appliance.forescout.local"
 
 func removeLines(fn string, start, n int) (err error) {
 	if start < 1 {
@@ -164,7 +168,54 @@ func FSLogin() {
 			XSRFTOKEN = cookie.Value
 		}
 	}
+}
 
+func ConnectTest() bool {
+
+	site := "https://forescout.scspa.local/seg/api/v1/environment/configuration"
+	method := "GET"
+
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+
+	client := &http.Client{
+		Transport: transport,
+	}
+
+	req, err := http.NewRequest(method, site, nil)
+
+	if err != nil {
+		fmt.Println(err)
+		return false
+	}
+	req.Header.Add("Host", FSApplianceFQDN)
+	req.Header.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.54 Safari/537.36")
+	req.Header.Add("Accept", "application/json, text/plain, */*")
+	req.Header.Set("referer", fmt.Sprintf("https://%s/forescout-client/", FSApplianceFQDN))
+	user := fmt.Sprintf("%%22%s%%22", FSusername)
+	Cookies := fmt.Sprintf("JSESSIONID=%v; user=%v; XSRF-TOKEN=%v", JSESSIONID, user, XSRFTOKEN)
+	req.Header.Set("Cookie", Cookies)
+	req.Header.Add("Accept-Language", "en-US,en;q=0.9")
+
+	res, err := client.Do(req)
+	if err != nil {
+		fmt.Println(err)
+		return false
+	}
+	defer res.Body.Close()
+
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		fmt.Println(err)
+		return false
+	}
+
+	if len(body) == 0 {
+		return false
+	} else {
+		return true
+	}
 }
 
 func GetDSTZones(zoneID string) []string {
@@ -506,46 +557,67 @@ func SRCzoneToZoneConnections(SRCZone string, DSTZone string) ([]string, error) 
 }
 
 func ExportData(SRCZone string, DSTZone string) {
-
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		DisableCompression: true,
 	}
 
 	client := &http.Client{
 		Transport: transport,
 	}
-	site := fmt.Sprintf("https://%s/seg/api/v2/matrix/data/0/services-export?srcZoneId=%s&dstZoneId=%s&shouldOnlyShowPolicyViolation=false&orderBy=asc", FSApplianceFQDN, SRCZone, DSTZone)
-	req, err := http.NewRequest("GET", site, nil)
+
+
+	site := fmt.Sprintf("https://%s/seg/api/v3/matrix/data/0/services-export", FSApplianceFQDN)
+	method := "POST"
+
+	//payload := strings.NewReader(`{"srcZoneId":"g_8973766297000773843","dstZoneId":"g_3554460426726078343","shouldOnlyShowPolicyViolation":false}`)
+	payloadFormat := fmt.Sprintf(`{"srcZoneId":"%s","dstZoneId":"%s","shouldOnlyShowPolicyViolation":false}`, SRCZone, DSTZone)
+	payload := strings.NewReader(payloadFormat)
+	req, err := http.NewRequest(method, site, payload)
+
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println(err)
+		return
 	}
-	req.Header.Set("authority", FSApplianceFQDN)
-	req.Header.Set("pragma", "no-cache")
-	req.Header.Set("accept", "application/json, text/plain, */*")
-	req.Header.Set("cache-control", "no-cache")
-	req.Header.Set("sec-ch-ua-mobile", "?0")
-	req.Header.Set("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36")
-	req.Header.Set("sec-fetch-site", "same-origin")
-	req.Header.Set("sec-fetch-mode", "cors")
-	req.Header.Set("sec-fetch-dest", "empty")
+	req.Header.Add("Host", FSApplianceFQDN)
+	req.Header.Add("Accept", "application/json, text/plain, */*")
+	req.Header.Add("Sec-Ch-Ua-Mobile", "?0")
+	req.Header.Add("Content-Type", "application/json;charset=UTF-8")
+	req.Header.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.61 Safari/537.36")
+	req.Header.Add("Sec-Fetch-Site", "same-origin")
+	req.Header.Add("Sec-Fetch-Mode", "cors")
+	req.Header.Add("Sec-Fetch-Dest", "empty")
 	req.Header.Set("referer", fmt.Sprintf("https://%s/forescout-client/", FSApplianceFQDN))
-	req.Header.Set("accept-language", "en-US,en;q=0.9")
+	//req.Header.Add("Accept-Encoding", "gzip, deflate")
+	req.Header.Add("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Add("Connection", "close")
 	user := fmt.Sprintf("%%22%s%%22", FSusername)
 	Cookies := fmt.Sprintf("JSESSIONID=%v; user=%v; XSRF-TOKEN=%v", JSESSIONID, user, XSRFTOKEN)
 	req.Header.Set("Cookie", Cookies)
+	req.Header.Set("X-Xsrf-Token", XSRFTOKEN)
+
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println(err)
+		return
 	}
-	defer resp.Body.Close()
+	if req.Body != nil {
+		reUseBody, _ = req.GetBody()
+	}
+	if reUseBody != nil {
+		req.Body = reUseBody
+	}
+
 	re := regexp.MustCompile(`"(.*?)"`)
 	filename := re.FindString(strings.Join(resp.Header["Content-Disposition"], "; "))
+	filename = strings.ReplaceAll(filename, "\"", "")
+
 	bodyText, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Fatal(err)
 	}
-	filename = strings.ReplaceAll(filename, "\"", "")
 	ioutil.WriteFile(filename, bodyText, 644)
+	resp.Body.Close()
 
 	f, _ := os.Open(filename)
 	scanner := bufio.NewScanner(f)
@@ -558,6 +630,75 @@ func ExportData(SRCZone string, DSTZone string) {
 		}
 	}
 
+
+}
+
+func timeBasedFilter(days int) {
+
+	site := fmt.Sprintf("https://%s/seg/api/v1/user/configuration/timeBasedFilter", FSApplianceFQDN)
+	method := "PUT"
+
+	payload := strings.NewReader(fmt.Sprintf("{\"lastDaysFilter\":%d}", days))
+
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+
+	client := &http.Client{
+		Transport: transport,
+	}
+	req, err := http.NewRequest(method, site, payload)
+
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	req.Header.Add("Host", FSApplianceFQDN)
+	req.Header.Add("X-Xsrf-Token", XSRFTOKEN)
+	req.Header.Add("Sec-Ch-Ua-Mobile", "?0")
+	req.Header.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.54 Safari/537.36")
+	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("Accept", "application/json, text/plain, */*")
+	req.Header.Add("Origin", fmt.Sprintf("https://%s", FSApplianceFQDN))
+	req.Header.Set("referer", fmt.Sprintf("https://%s/forescout-client/", FSApplianceFQDN))
+	//req.Header.Add("Accept-Encoding", "gzip, deflate")
+	//req.Header.Add("Accept-Language", "en-US,en;q=0.9")
+	user := fmt.Sprintf("%%22%s%%22", FSusername)
+	Cookies := fmt.Sprintf("JSESSIONID=%v; user=%v; XSRF-TOKEN=%v", JSESSIONID, user, XSRFTOKEN)
+	req.Header.Set("Cookie", Cookies)
+
+	res, err := client.Do(req)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer res.Body.Close()
+
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Sprintln(string(body))
+}
+
+func StringPrompt(label string) string {
+	var s string
+	r := bufio.NewReader(os.Stdin)
+	if label == "Password:" {
+		fmt.Fprint(os.Stderr, label+" ")
+		bytePassword, _ := term.ReadPassword(int(syscall.Stdin))
+		s = string(bytePassword)
+	} else {
+		for {
+			fmt.Fprint(os.Stderr, label+" ")
+			s, _ = r.ReadString('\n')
+			if s != "" {
+				break
+			}
+		}
+	}
+	return strings.TrimSpace(s)
 }
 
 func main() {
@@ -568,9 +709,29 @@ func main() {
 	ZoneName := flag.String("n", "", "Specify a Zone name to lookup.")
 	exportDSTDataFlag := flag.Bool("oS", false, "Export data given source name. (Requires -n)")
 	exportSRCDataFlag := flag.Bool("oD", false, "Export data given destination name. (Requires -n)")
+	timeFilter := flag.Int("f", 3, "Set how many days to look back into the data.")
 	test := flag.Bool("t", false, "flag to test functions")
+	username := flag.String("u", FSusername, "Specify username to connect to server with. Will use embed username if configured.")
+	password := flag.String("p", FSpassword, "Specify password to connect to server with. Will use embed password if configured.")
+	server := flag.String("fS", FSApplianceFQDN, "Specify server to connect to. Will use embed FQDN if configured.")
 	flag.Parse()
 
+
+	if *username == "" || *password == "" || *server == "" {
+		fmt.Println("Username, password, or server not specified.")
+		if *username == "" {
+			FSusername = StringPrompt("Username:")
+		}
+		if *password == "" {
+			FSpassword = StringPrompt("Password:")
+		}
+		if *server == "" {
+			FSApplianceFQDN = StringPrompt("Forescout Appliance FQDN:")
+		}
+	}
+	FSusername = *username
+	FSpassword = *password
+	FSApplianceFQDN = *server
 	if *test {
 		return
 	} else if *ZoneName == "" {
@@ -579,11 +740,18 @@ func main() {
 		return
 	} else {
 		FSLogin()
+		if ConnectTest() {
+			fmt.Printf("Successfully logged into %s\n", FSApplianceFQDN)
+		} else {
+			fmt.Printf("Could not login to %s: \n This could be due to incorrect credentials, or it could not connect to the server.", FSApplianceFQDN)
+			return
+		}
 		check := GetZoneID(*ZoneName)
 		if check == "No Zone ID Found." {
 			fmt.Println(check)
 			return
 		}
+		timeBasedFilter(*timeFilter)
 		if *GetSRCZonesFlag {
 			fmt.Println(GetSRCZones(GetZoneID(*ZoneName)))
 		} else if *GetDSTZonesFlag {
@@ -593,43 +761,51 @@ func main() {
 		} else if *exportDSTDataFlag {
 			SRCZone := GetZoneID(*ZoneName)
 			var DSTZonesWData []string
+			var DSTZonesCollection []string
 			dir := fmt.Sprintf("Connections made from %s", *ZoneName)
 			os.Mkdir(dir, 0600)
 			os.Chdir(dir)
 			DSTZones := GetDSTZones(SRCZone)
-			bar := pb.StartNew(len(DSTZones))
-			bar.Increment()
 			for _, DSTZone := range DSTZones {
 				val, _ := CheckOccurrences(SRCZone, DSTZone)
 				if val {
 					DSTZonesWData, _ = DSTzoneToZoneConnections(SRCZone, DSTZone)
 					for _, DSTZone = range DSTZonesWData {
-						ExportData(SRCZone, DSTZone)
+						DSTZonesCollection = append(DSTZonesCollection, DSTZone)
 					}
 				}
+			}
+			bar := pb.StartNew(len(DSTZonesCollection))
+			for _, DSTZone := range DSTZonesCollection {
+				ExportData(SRCZone, DSTZone)
 				bar.Increment()
 			}
+			time.Sleep(1 * time.Second)
 			fmt.Printf("\nData successfully exported to \"%s\"", dir)
 
 		} else if *exportSRCDataFlag {
 			var SRCZonesWData []string
+			var SRCZoneCollection []string
 			DSTZone := GetZoneID(*ZoneName)
 			dir := fmt.Sprintf("Connections made to %s", *ZoneName)
 			os.Mkdir(dir, 0600)
 			os.Chdir(dir)
 			SRCZones := GetSRCZones(DSTZone)
-			bar := pb.StartNew(len(SRCZones))
-			bar.Increment()
 			for _, SRCZone := range SRCZones {
 				val, _ := CheckOccurrences(SRCZone, DSTZone)
 				if val {
 					SRCZonesWData, _ = SRCzoneToZoneConnections(SRCZone, DSTZone)
 					for _, SRCZone = range SRCZonesWData {
-						ExportData(SRCZone, DSTZone)
+						SRCZoneCollection = append(SRCZoneCollection, SRCZone)
 					}
 				}
+			}
+			bar := pb.StartNew(len(SRCZoneCollection))
+			for _, SRCZone := range SRCZoneCollection {
+				ExportData(SRCZone, DSTZone)
 				bar.Increment()
 			}
+			time.Sleep(1 * time.Second)
 			fmt.Printf("\nData successfully exported to \"%s\"", dir)
 		} else {
 			flag.PrintDefaults()
