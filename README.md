@@ -23,3 +23,30 @@ There are 3 constants (FSusername, FSpassword, and FSApplianceFQDN) that need to
 From the folder this was downloaded from execute the command: `go build -ldflags="-s -w" .` which will build everything
 
 NOTE: The `chrome-win` directory and the `chromedriver` binary must be in the same directory as the eyeSegmentAPI binary in order to run properly. Running the binary with no switches will give you a help page of all of the available switches.
+
+
+## Syntax
+
+The following commands can be used with eyeSegmentAPI.exe
+
+- -c Print Zone ID from given name
+
+- -d Get all destination zones from selected source
+
+- -f int Set how many days to look back into the data (default 3)
+
+- -fS string Specify server to connect to, will use the embeded FQDN if configured.
+
+- -n string Specify a Zone name to lookup
+
+- -oD Export data given destination. (Requires -n)
+
+- -oS Export data given source name. (Requiers -n)
+
+- -p string Specify password to connecto server with. Will use the embedded password if configured 
+
+- -s Getall source zones from selected destination
+
+- -t flag to test functions
+
+- u string Specify username to connect to servier with. Will use embedded username

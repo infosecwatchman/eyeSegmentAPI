@@ -7,10 +7,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/Jeffail/gabs/v2"
-	"github.com/cheggaaa/pb/v3"
-	"github.com/tebeka/selenium"
-	"github.com/tebeka/selenium/chrome"
 	"io"
 	"io/ioutil"
 	"log"
@@ -20,16 +16,20 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"golang.org/x/term"
 
+	"github.com/Jeffail/gabs/v2"
+	"github.com/cheggaaa/pb/v3"
+	"github.com/tebeka/selenium"
+	"github.com/tebeka/selenium/chrome"
+	"golang.org/x/term"
 )
 
 var JSESSIONID string
 var XSRFTOKEN string
 var reUseBody io.ReadCloser
 
-var FSusername = "" //const FSusername = "user"
-var FSpassword = "" //const FSpassword = "password"
+var FSusername = ""      //const FSusername = "user"
+var FSpassword = ""      //const FSpassword = "password"
 var FSApplianceFQDN = "" //const FSApplianceFQDN = "appliance.forescout.local"
 
 func removeLines(fn string, start, n int) (err error) {
@@ -128,7 +128,7 @@ func FSLogin() {
 		log.Println(err)
 	}
 	defer wd.Quit()
-	
+
 	if err := wd.Get(fmt.Sprintf("https://%s/fsum/login", FSApplianceFQDN)); err != nil {
 		log.Fatal(err)
 	}
@@ -222,7 +222,6 @@ func GetDSTZones(zoneID string) []string {
 	var DSTZones []string
 	site := fmt.Sprintf("https://%s/seg/api/v2/matrix/0/policies/visualization?srcZoneId=%s", FSApplianceFQDN, zoneID)
 	method := "GET"
-
 
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -558,14 +557,13 @@ func SRCzoneToZoneConnections(SRCZone string, DSTZone string) ([]string, error) 
 
 func ExportData(SRCZone string, DSTZone string) {
 	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},
 		DisableCompression: true,
 	}
 
 	client := &http.Client{
 		Transport: transport,
 	}
-
 
 	site := fmt.Sprintf("https://%s/seg/api/v3/matrix/data/0/services-export", FSApplianceFQDN)
 	method := "POST"
@@ -629,7 +627,6 @@ func ExportData(SRCZone string, DSTZone string) {
 			break
 		}
 	}
-
 
 }
 
@@ -711,11 +708,10 @@ func main() {
 	exportSRCDataFlag := flag.Bool("oD", false, "Export data given destination name. (Requires -n)")
 	timeFilter := flag.Int("f", 3, "Set how many days to look back into the data.")
 	test := flag.Bool("t", false, "flag to test functions")
-	username := flag.String("u", FSusername, "Specify username to connect to server with. Will use embed username if configured.")
-	password := flag.String("p", FSpassword, "Specify password to connect to server with. Will use embed password if configured.")
-	server := flag.String("fS", FSApplianceFQDN, "Specify server to connect to. Will use embed FQDN if configured.")
+	username := flag.String("u", FSusername, "Specify username to connect to server with. Will use embedded username if configured.")
+	password := flag.String("p", FSpassword, "Specify password to connect to server with. Will use embedded password if configured.")
+	server := flag.String("fS", FSApplianceFQDN, "Specify server to connect to. Will use embedded FQDN if configured.")
 	flag.Parse()
-
 
 	if *username == "" || *password == "" || *server == "" {
 		fmt.Println("Username, password, or server not specified.")
