@@ -1,6 +1,6 @@
 # Overview
 
-This project is an extension of the Forescout (<https://forescout.com>) eyeSegment product. Information about eyeSegment can be found on here: <https://www.forescout.com/resources/forescout-eyesegment-datasheet/>. THis project is a GoLang project to programatically download data into a CSV, using Forescout's groups.
+This project is an extension of the Forescout (<https://forescout.com>) eyeSegment product. Information about eyeSegment can be found on here: <https://www.forescout.com/resources/forescout-eyesegment-datasheet/>. This project is a GoLang project to programatically download data into a CSV, using Forescout's groups.
 
 Go 1.16 was used to build this project.
 
