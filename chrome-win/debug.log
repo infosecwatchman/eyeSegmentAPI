@@ -684,3 +684,9 @@
 [1008/123219.610:ERROR:gpu_init.cc(441)] Passthrough is not supported, GL is swiftshader
 [1008/124128.958:ERROR:gpu_init.cc(441)] Passthrough is not supported, GL is swiftshader
 [1008/124717.745:ERROR:gpu_init.cc(441)] Passthrough is not supported, GL is swiftshader
+[1022/160113.389:ERROR:gpu_init.cc(441)] Passthrough is not supported, GL is swiftshader
+[1022/160113.546:ERROR:command_buffer_proxy_impl.cc(133)] ContextResult::kTransientFailure: Failed to send GpuControl.CreateCommandBuffer.
+[1022/160113.547:WARNING:ipc_message_attachment_set.cc(49)] MessageAttachmentSet destroyed with unconsumed attachments: 0/1
+[1022/160526.670:ERROR:gpu_init.cc(441)] Passthrough is not supported, GL is swiftshader
+[1206/172401.587:ERROR:gpu_init.cc(441)] Passthrough is not supported, GL is swiftshader
+[1206/172444.322:ERROR:gpu_init.cc(441)] Passthrough is not supported, GL is swiftshader
