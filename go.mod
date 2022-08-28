@@ -1,4 +1,4 @@
-module eyeSegmentAPI
+module github.com/infosecwatchman/eyeSegmentAPI
 
 go 1.16
 
