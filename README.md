@@ -7,6 +7,7 @@ Go 1.16 was used to build this project.
 ## Steps to build this
 
 These steps assume you already have Go installed, if not please visit <https://golang.org/dl/> to download and install the version need for your computer.
+Also, this assumes you have downloaded the portable version of chrome from https://portableapps.com/apps/internet/google_chrome_portable, and chromedriver with appropriately matching versions from https://chromedriver.chromium.org/downloads. The `chrome-win` directory and the `chromedriver` binary must be in the same directory as the eyeSegmentAPI binary in order to run properly. The portable chrome download will likely need a folder name change. The binary is looking for chrome in `chrome-win\chrome.exe`, and the chromedriver in the same directory as the eyeSegment binary with the name `chromedriver.exe`.
 
 ### Edit the constants
 
