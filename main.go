@@ -3,10 +3,16 @@ package eyeSegmentAPI
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/Jeffail/gabs/v2"
+	"github.com/cheggaaa/pb/v3"
+	"github.com/tebeka/selenium"
+	"github.com/tebeka/selenium/chrome"
+	"golang.org/x/term"
 	"io"
 	"io/ioutil"
 	"log"
@@ -16,22 +22,20 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	"github.com/Jeffail/gabs/v2"
-	"github.com/cheggaaa/pb/v3"
-	"github.com/tebeka/selenium"
-	"github.com/tebeka/selenium/chrome"
-	"golang.org/x/term"
 )
 
+// These are global variables that will be used in multiple functions.
 var JSESSIONID string
 var XSRFTOKEN string
 var reUseBody io.ReadCloser
 
-var FSusername = ""      //const FSusername = "user"
-var FSpassword = ""      //const FSpassword = "password"
-var FSApplianceFQDN = "" //const FSApplianceFQDN = "appliance.forescout.local"
+// These are constants that will be used for logging in to the website.
+const FSusername = "user"
+const FSpassword = "password"
+const FSApplianceFQDN = "appliance.forescout.local"
 
+// This function is used to remove a given number of lines from a file.
+// fn is the file name, start is the line number to start removing from, and n is the number of lines to remove.
 func removeLines(fn string, start, n int) (err error) {
 	if start < 1 {
 		return errors.New("invalid request.  line numbers start at 1.")
@@ -73,6 +77,7 @@ func removeLines(fn string, start, n int) (err error) {
 	return
 }
 
+// This function is used by the removeLines function.
 func skip(b []byte, n int) ([]byte, bool) {
 	for ; n > 0; n-- {
 		if len(b) == 0 {
@@ -89,6 +94,7 @@ func skip(b []byte, n int) ([]byte, bool) {
 	return b, true
 }
 
+// This function logs in to the website using the constants defined earlier.
 func FSLogin() {
 	var service *selenium.Service
 	var caps selenium.Capabilities
@@ -109,67 +115,47 @@ func FSLogin() {
 	}
 	opts := []selenium.ServiceOption{
 		selenium.ChromeDriver(chromedriver), // Specify the path to GeckoDriver in order to use Firefox.
+		selenium.Output(os.Stderr),          // Output debug information to STDERR.
 	}
 
-	service, err = selenium.NewChromeDriverService(chromedriver, port, opts...)
-	if err != nil {
-		log.Fatal(err) // panic is used only as an example and is not otherwise recommended.
+	if service, err = selenium.NewChromeDriverService(chromedriver, port, opts...); err != nil {
+		panic(err) // panic is used to handle errors.
 	}
 
 	defer service.Stop()
-	caps = selenium.Capabilities{
-		"browserName":         "chrome",
-		"acceptInsecureCerts": true,
-	}
+
+	// Connect to the WebDriver instance running locally.
 	caps.AddChrome(chromeopts)
-	wd, err = selenium.NewRemote(caps, "http://127.0.0.1:9515/wd/hub")
-	if err != nil {
-		log.Printf("Error starting new remote capability: %v", err)
-		log.Println(err)
+	if wd, err = selenium.NewRemote(caps, fmt.Sprintf("http://localhost:%d/wd/hub", port)); err != nil {
+		panic(err)
 	}
 	defer wd.Quit()
 
-	if err := wd.Get(fmt.Sprintf("https://%s/fsum/login", FSApplianceFQDN)); err != nil {
-		log.Fatal(err)
-	}
-	username, err := wd.FindElement(selenium.ByXPATH, "//*[@id=\"username\"]")
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = username.SendKeys(FSusername)
-	if err != nil {
-		log.Fatal(err)
-	}
-	password, err := wd.FindElement(selenium.ByXPATH, "//*[@id=\"password\"]")
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = password.SendKeys(FSpassword)
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = password.SendKeys(selenium.EnterKey)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if err := wd.Get(fmt.Sprintf("https://%s/seg/singleSpaEntry.js", FSApplianceFQDN)); err != nil {
-		log.Fatal(err)
-	}
-	time.Sleep(3 * time.Second)
-	cookies, err := wd.GetCookies()
-	//fmt.Println(cookies)
+	// Get a session.
+	wd.Get(fmt.Sprintf("https://%s/", FSApplianceFQDN))
+	time.Sleep(2 * time.Second)
+
+	// Log in to the website.
+	elem, _ := wd.FindElement(selenium.ByID, "username")
+	elem.SendKeys(FSusername)
+	elem, _ = wd.FindElement(selenium.ByID, "password")
+	elem.SendKeys(FSpassword)
+	elem, _ = wd.FindElement(selenium.ByID, "login-button")
+	elem.Click()
+	time.Sleep(2 * time.Second)
+
+	// Get the JSESSIONID and XSRFTOKEN values.
+	cookies, _ := wd.GetCookies()
 	for _, cookie := range cookies {
 		if cookie.Name == "JSESSIONID" {
-			//fmt.Println(cookie.Name, cookie.Value)
 			JSESSIONID = cookie.Value
-		}
-		if cookie.Name == "XSRF-TOKEN" {
-			//fmt.Println(cookie.Name, cookie.Value)
+		} else if cookie.Name == "XSRF-TOKEN" {
 			XSRFTOKEN = cookie.Value
 		}
 	}
 }
 
+// This function connects to the configured forescout appliance to ensure connectivity.
 func ConnectTest() bool {
 
 	site := fmt.Sprintf("https://%s/seg/api/v1/environment/configuration", FSApplianceFQDN)
@@ -210,7 +196,6 @@ func ConnectTest() bool {
 		fmt.Println(err)
 		return false
 	}
-
 	if len(body) == 0 {
 		return false
 	} else {
@@ -218,9 +203,10 @@ func ConnectTest() bool {
 	}
 }
 
+// Get array of destinations zones 
 func GetDSTZones(zoneID string) []string {
 	var DSTZones []string
-	site := fmt.Sprintf("https://%s/seg/api/v2/matrix/0/policies/visualization?srcZoneId=%s", FSApplianceFQDN, zoneID)
+	site := fmt.Sprintf("https://%s/seg/api/v3/matrix/0/policies/visualization?srcZoneId=%s", FSApplianceFQDN, zoneID)
 	method := "GET"
 
 	transport := &http.Transport{
@@ -268,9 +254,10 @@ func GetDSTZones(zoneID string) []string {
 	return DSTZones
 }
 
+// Get array of source zones
 func GetSRCZones(zoneID string) []string {
 	var SRCZones []string
-	site := fmt.Sprintf("https://%s/seg/api/v2/matrix/0/policies/visualization?dstZoneId=%s", FSApplianceFQDN, zoneID)
+	site := fmt.Sprintf("https://%s/seg/api/v3/matrix/0/policies/visualization?dstZoneId=%s", FSApplianceFQDN, zoneID)
 	method := "GET"
 
 	transport := &http.Transport{
@@ -324,6 +311,7 @@ func GetSRCZones(zoneID string) []string {
 	return SRCZones
 }
 
+// Get ID of zone given natural name
 func GetZoneID(zoneName string) string {
 	var ZoneID string
 
@@ -335,7 +323,7 @@ func GetZoneID(zoneName string) string {
 		Transport: transport,
 	}
 
-	req, err := http.NewRequest("GET", fmt.Sprintf("https://%s/seg/api/v3/environment/zone-map", FSApplianceFQDN), nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://%s/seg/api/v1/zone-map/", FSApplianceFQDN), nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -377,6 +365,7 @@ func GetZoneID(zoneName string) string {
 	return ZoneID
 }
 
+// Remove the beginning and ending quotes of given string
 func trimQuote(s string) string {
 	if len(s) > 0 && s[0] == '"' {
 		s = s[1:]
@@ -387,6 +376,7 @@ func trimQuote(s string) string {
 	return s
 }
 
+// Check if data exists between source and destination zones. Returns bool and error.
 func CheckOccurrences(SRCZone string, DSTZone string) (bool, error) {
 	site := fmt.Sprintf("https://%s/seg/api/v3/matrix/data/0/occurrences-by-port-range?srcZoneId=%s&dstZoneId=%s&shouldOnlyShowPolicyViolation=false", FSApplianceFQDN, SRCZone, DSTZone)
 	method := "GET"
@@ -443,36 +433,43 @@ func CheckOccurrences(SRCZone string, DSTZone string) (bool, error) {
 	}
 }
 
+// Drill down the matrix to the bottom most zones given any combination of source and destination zones. Return array of destinations zones. 
 func DSTzoneToZoneConnections(SRCZone string, DSTZone string) ([]string, error) {
 	var DSTZones []string
-	site := fmt.Sprintf("https://%s/seg/api/v3/matrix/data/0/details/zone-traffic-details?srcZoneId=%s&dstZoneId=%s&shouldOnlyShowPolicyViolation=false&showDetailedZones=false", FSApplianceFQDN, SRCZone, DSTZone)
-	method := "GET"
+	site := fmt.Sprintf("https://%s/seg/api/v1/zone-to-zone", FSApplianceFQDN)
+	method := "POST"
+
+	payload := strings.NewReader(fmt.Sprintf(`{"matrixId":"0","srcZoneId":"%s","dstZoneId":"%s","shouldOnlyShowPolicyViolation":false}`, SRCZone, DSTZone))
 
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
-
 	client := &http.Client{
 		Transport: transport,
 	}
-
-	req, err := http.NewRequest(method, site, nil)
+	req, err := http.NewRequest(method, site, payload)
 
 	if err != nil {
 		fmt.Println(err)
 		return DSTZones, err
 	}
-	req.Header.Set("authority", FSApplianceFQDN)
-	req.Header.Set("pragma", "no-cache")
-	req.Header.Set("accept", "application/json, text/plain, */*")
-	req.Header.Set("cache-control", "no-cache")
-	req.Header.Set("sec-ch-ua-mobile", "?0")
-	req.Header.Set("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36")
-	req.Header.Set("sec-fetch-site", "same-origin")
-	req.Header.Set("sec-fetch-mode", "cors")
-	req.Header.Set("sec-fetch-dest", "empty")
-	req.Header.Set("referer", fmt.Sprintf("https://%s/forescout-client/", FSApplianceFQDN))
-	req.Header.Set("accept-language", "en-US,en;q=0.9")
+	req.Header.Add("Host", FSApplianceFQDN)
+	//req.Header.Add("Content-Length", "125")
+	req.Header.Add("Sec-Ch-Ua", "\"Chromium\";v=\"107\", \"Not=A?Brand\";v=\"24\"")
+	req.Header.Add("Accept", "application/json, text/plain, */*")
+	req.Header.Add("Content-Type", "application/json;charset=UTF-8")
+	req.Header.Add("X-Xsrf-Token", XSRFTOKEN)
+	req.Header.Add("Sec-Ch-Ua-Mobile", "?0")
+	req.Header.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.5304.107 Safari/537.36")
+	req.Header.Add("Sec-Ch-Ua-Platform", "\"Windows\"")
+	req.Header.Add("Origin", FSApplianceFQDN)
+	req.Header.Add("Sec-Fetch-Site", "same-origin")
+	req.Header.Add("Sec-Fetch-Mode", "cors")
+	req.Header.Add("Sec-Fetch-Dest", "empty")
+	req.Header.Add("Referer", fmt.Sprintf("https://%s/forescout-client/", FSApplianceFQDN))
+	req.Header.Add("Accept-Encoding", "gzip, deflate")
+	req.Header.Add("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Add("Connection", "close")
 	user := fmt.Sprintf("%%22%s%%22", FSusername)
 	Cookies := fmt.Sprintf("JSESSIONID=%v; user=%v; XSRF-TOKEN=%v", JSESSIONID, user, XSRFTOKEN)
 	req.Header.Set("Cookie", Cookies)
@@ -483,12 +480,21 @@ func DSTzoneToZoneConnections(SRCZone string, DSTZone string) ([]string, error) 
 		return DSTZones, err
 	}
 	defer res.Body.Close()
-
-	body, err := ioutil.ReadAll(res.Body)
+	// Create a new gzip reader for the response body
+	gzr, err := gzip.NewReader(res.Body)
 	if err != nil {
 		fmt.Println(err)
 		return DSTZones, err
 	}
+
+	// Read the decompressed response body into memory
+	body, err := ioutil.ReadAll(gzr)
+	if err != nil {
+		fmt.Println(err)
+		return DSTZones, err
+	}
+
+	// Parse the JSON response
 	jsonParsed, err := gabs.ParseJSON(body)
 	if err != nil {
 		panic(err)
@@ -499,36 +505,43 @@ func DSTzoneToZoneConnections(SRCZone string, DSTZone string) ([]string, error) 
 	return DSTZones, nil
 }
 
+// Drill down the matrix to the bottom most zones given any combination of source and destination zones. Return array of source zones. 
 func SRCzoneToZoneConnections(SRCZone string, DSTZone string) ([]string, error) {
 	var SRCZones []string
-	site := fmt.Sprintf("https://%s/seg/api/v3/matrix/data/0/details/zone-traffic-details?srcZoneId=%s&dstZoneId=%s&shouldOnlyShowPolicyViolation=false&showDetailedZones=false", FSApplianceFQDN, SRCZone, DSTZone)
-	method := "GET"
+	site := fmt.Sprintf("https://%s/seg/api/v1/zone-to-zone", FSApplianceFQDN)
+	method := "POST"
+
+	payload := strings.NewReader(fmt.Sprintf(`{"matrixId":"0","srcZoneId":"%s","dstZoneId":"%s","shouldOnlyShowPolicyViolation":false}`, SRCZone, DSTZone))
 
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
-
 	client := &http.Client{
 		Transport: transport,
 	}
-
-	req, err := http.NewRequest(method, site, nil)
+	req, err := http.NewRequest(method, site, payload)
 
 	if err != nil {
 		fmt.Println(err)
 		return SRCZones, err
 	}
-	req.Header.Set("authority", FSApplianceFQDN)
-	req.Header.Set("pragma", "no-cache")
-	req.Header.Set("accept", "application/json, text/plain, */*")
-	req.Header.Set("cache-control", "no-cache")
-	req.Header.Set("sec-ch-ua-mobile", "?0")
-	req.Header.Set("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36")
-	req.Header.Set("sec-fetch-site", "same-origin")
-	req.Header.Set("sec-fetch-mode", "cors")
-	req.Header.Set("sec-fetch-dest", "empty")
-	req.Header.Set("referer", fmt.Sprintf("https://%s/forescout-client/", FSApplianceFQDN))
-	req.Header.Set("accept-language", "en-US,en;q=0.9")
+	req.Header.Add("Host", FSApplianceFQDN)
+	//req.Header.Add("Content-Length", "125")
+	req.Header.Add("Sec-Ch-Ua", "\"Chromium\";v=\"107\", \"Not=A?Brand\";v=\"24\"")
+	req.Header.Add("Accept", "application/json, text/plain, */*")
+	req.Header.Add("Content-Type", "application/json;charset=UTF-8")
+	req.Header.Add("X-Xsrf-Token", XSRFTOKEN)
+	req.Header.Add("Sec-Ch-Ua-Mobile", "?0")
+	req.Header.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.5304.107 Safari/537.36")
+	req.Header.Add("Sec-Ch-Ua-Platform", "\"Windows\"")
+	req.Header.Add("Origin", FSApplianceFQDN)
+	req.Header.Add("Sec-Fetch-Site", "same-origin")
+	req.Header.Add("Sec-Fetch-Mode", "cors")
+	req.Header.Add("Sec-Fetch-Dest", "empty")
+	req.Header.Add("Referer", fmt.Sprintf("https://%s/forescout-client/", FSApplianceFQDN))
+	req.Header.Add("Accept-Encoding", "gzip, deflate")
+	req.Header.Add("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Add("Connection", "close")
 	user := fmt.Sprintf("%%22%s%%22", FSusername)
 	Cookies := fmt.Sprintf("JSESSIONID=%v; user=%v; XSRF-TOKEN=%v", JSESSIONID, user, XSRFTOKEN)
 	req.Header.Set("Cookie", Cookies)
@@ -540,11 +553,21 @@ func SRCzoneToZoneConnections(SRCZone string, DSTZone string) ([]string, error) 
 	}
 	defer res.Body.Close()
 
-	body, err := ioutil.ReadAll(res.Body)
+	// Create a new gzip reader for the response body
+	gzr, err := gzip.NewReader(res.Body)
 	if err != nil {
 		fmt.Println(err)
 		return SRCZones, err
 	}
+
+	// Read the decompressed response body into memory
+	body, err := ioutil.ReadAll(gzr)
+	if err != nil {
+		fmt.Println(err)
+		return SRCZones, err
+	}
+
+	// Parse the JSON response
 	jsonParsed, err := gabs.ParseJSON(body)
 	if err != nil {
 		panic(err)
@@ -555,6 +578,7 @@ func SRCzoneToZoneConnections(SRCZone string, DSTZone string) ([]string, error) 
 	return SRCZones, nil
 }
 
+// Export csv from given source and destination zone.
 func ExportData(SRCZone string, DSTZone string) {
 	transport := &http.Transport{
 		TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},
@@ -630,6 +654,7 @@ func ExportData(SRCZone string, DSTZone string) {
 
 }
 
+// Search back the number of days by given int. Default is 3 day lookback
 func timeBasedFilter(days int) {
 
 	site := fmt.Sprintf("https://%s/seg/api/v1/user/configuration/timeBasedFilter", FSApplianceFQDN)
@@ -679,6 +704,64 @@ func timeBasedFilter(days int) {
 	fmt.Sprintln(string(body))
 }
 
+// Clear any filter or time range from previous sessions
+func ClearFilter() {
+
+	transport := &http.Transport{
+		TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},
+		DisableCompression: true,
+	}
+
+	client := &http.Client{
+		Transport: transport,
+	}
+
+	url := fmt.Sprintf("https://%s/seg/api/v2/filter", FSApplianceFQDN)
+	method := "POST"
+
+	//url := "https://10.9.0.10/seg/api/v2/filter"
+	//method := "POST"
+	//
+	payload := strings.NewReader(`{"srcZones":[],"dstZones":[],"services":[],"protocols":[],"isExclude":false,"filterEnabled":false,"hasFilters":true,"srcIp":"","dstIp":"","timeRangeFilter":null}`)
+	//
+	//client := &http.Client {
+	//}
+	req, err := http.NewRequest(method, url, payload)
+
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	req.Header.Add("Host", FSApplianceFQDN)
+	req.Header.Add("X-Xsrf-Token", XSRFTOKEN)
+	req.Header.Add("Sec-Ch-Ua-Mobile", "?0")
+	req.Header.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.54 Safari/537.36")
+	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("Accept", "application/json, text/plain, */*")
+	req.Header.Add("Origin", fmt.Sprintf("https://%s", FSApplianceFQDN))
+	req.Header.Set("referer", fmt.Sprintf("https://%s/forescout-client/", FSApplianceFQDN))
+	//req.Header.Add("Accept-Encoding", "gzip, deflate")
+	//req.Header.Add("Accept-Language", "en-US,en;q=0.9")
+	user := fmt.Sprintf("%%22%s%%22", FSusername)
+	Cookies := fmt.Sprintf("JSESSIONID=%v; user=%v; XSRF-TOKEN=%v", JSESSIONID, user, XSRFTOKEN)
+	req.Header.Set("Cookie", Cookies)
+
+	res, err := client.Do(req)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer res.Body.Close()
+
+	//body, err := ioutil.ReadAll(res.Body)
+	//if err != nil {
+	//	fmt.Println(err)
+	//	return
+	//}
+	//fmt.Println(string(body))
+}
+
+// Securely prompt for password in the cli
 func StringPrompt(label string) string {
 	var s string
 	r := bufio.NewReader(os.Stdin)
@@ -708,26 +791,37 @@ func main() {
 	exportSRCDataFlag := flag.Bool("oD", false, "Export data given destination name. (Requires -n)")
 	timeFilter := flag.Int("f", 3, "Set how many days to look back into the data.")
 	test := flag.Bool("t", false, "flag to test functions")
-	username := flag.String("u", FSusername, "Specify username to connect to server with. Will use embedded username if configured.")
-	password := flag.String("p", FSpassword, "Specify password to connect to server with. Will use embedded password if configured.")
+	username := flag.String("u", "", "Specify username to connect to server with. Will use embedded username if configured.")
+	password := flag.String("p", "", "Specify password to connect to server with. Will use embedded password if configured.")
 	server := flag.String("fS", FSApplianceFQDN, "Specify server to connect to. Will use embedded FQDN if configured.")
 	flag.Parse()
-
-	if *username == "" || *password == "" || *server == "" {
-		fmt.Println("Username, password, or server not specified.")
-		if *username == "" {
-			FSusername = StringPrompt("Username:")
+	if FSApplianceFQDN == "" || FSusername == "" || FSpassword == "" {
+		if *username == "" && FSusername == "" {
+			if FSusername == "" && *username != "" {
+				FSusername = *username
+			} else {
+				fmt.Println("Username not specified.")
+				FSusername = StringPrompt("Username:")
+			}
 		}
-		if *password == "" {
-			FSpassword = StringPrompt("Password:")
+		if *password == "" && FSpassword == "" {
+			if FSpassword == "" && *password != "" {
+				FSpassword = *password
+			} else {
+				fmt.Println("Password not specified.")
+				FSpassword = StringPrompt("Username:")
+			}
 		}
-		if *server == "" {
-			FSApplianceFQDN = StringPrompt("Forescout Appliance FQDN:")
+		if *server == "" && FSApplianceFQDN == "" {
+			if FSApplianceFQDN == "" && *server != "" {
+				FSApplianceFQDN = *server
+			} else {
+				fmt.Println("Server not specified.")
+				FSApplianceFQDN = StringPrompt("Forescout Appliance FQDN:")
+			}
 		}
 	}
-	FSusername = *username
-	FSpassword = *password
-	FSApplianceFQDN = *server
+
 	if *test {
 		return
 	} else if *ZoneName == "" {
@@ -747,6 +841,7 @@ func main() {
 			fmt.Println(check)
 			return
 		}
+		ClearFilter()
 		timeBasedFilter(*timeFilter)
 		if *GetSRCZonesFlag {
 			fmt.Println(GetSRCZones(GetZoneID(*ZoneName)))
