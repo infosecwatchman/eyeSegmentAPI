@@ -7,15 +7,14 @@ Go 1.16 was used to build this project.
 ## Steps to build this
 
 These steps assume you already have Go installed, if not please visit <https://golang.org/dl/> to download and install the version need for your computer.
-Also, this assumes you have downloaded the portable version of chrome from https://portableapps.com/apps/internet/google_chrome_portable, and chromedriver with appropriately matching versions from https://chromedriver.chromium.org/downloads. The `chrome-win` directory and the `chromedriver` binary must be in the same directory as the eyeSegmentAPI binary in order to run properly. The portable chrome download will likely need a folder name change. The binary is looking for chrome in `chrome-win\chrome.exe`, and the chromedriver in the same directory as the eyeSegment binary with the name `chromedriver.exe`.
 
 ### Edit the constants
 
-There are 3 constants (FSusername, FSpassword, and FSApplianceFQDN) that need to be changed in the main.go file.
+There are 3 constants (FSusername, FSpassword, and FSApplianceFQDN) that need to be changed in the main.go file. (If no these variables are not set before running, the application will automatically securely prompt for them one by one.)
 
 - FSusername: Username to login to the API and needs to have access to eyeSegment. Since the password is stored, it is recommended to use a different user than and administrative account.
 
-- FSpassword: Password to login to the API, this is stored in the main.go.
+- FSpassword: Password to login to the API, this is stored in the main.go. 
 
 - FSApplianceFQDN: Fully qualified domain name of the Appliance you are connecting. Since the API is calling the data stored in the cloud, we need to use the Enterprise Manager to pull this information.
 
@@ -23,7 +22,7 @@ There are 3 constants (FSusername, FSpassword, and FSApplianceFQDN) that need to
 
 From the folder this was downloaded from execute the command: `go build -ldflags="-s -w" .` which will build everything
 
-NOTE: The `chrome-win` directory and the `chromedriver` binary must be in the same directory as the eyeSegmentAPI binary in order to run properly. Running the binary with no switches will give you a help page of all of the available switches.
+NOTE: When the application is run the first time, it will automatically download a trimmed version of chromium into the current user's AppData directory. The chromium is used during the login process to capture the session cookies. 
 
 
 ## Syntax
