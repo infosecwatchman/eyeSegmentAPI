@@ -4,17 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/Jeffail/gabs/v2"
-	"github.com/cheggaaa/pb/v3"
-	"github.com/go-rod/rod"
-	"github.com/go-rod/rod/lib/input"
-	"github.com/go-rod/rod/lib/launcher"
-	"github.com/go-rod/rod/lib/proto"
-	"golang.org/x/term"
 	"io"
 	"io/ioutil"
 	"log"
@@ -24,6 +20,16 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/Jeffail/gabs/v2"
+	"github.com/cheggaaa/pb/v3"
+	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/input"
+	"github.com/go-rod/rod/lib/launcher"
+	"github.com/go-rod/rod/lib/proto"
+	"github.com/spf13/viper"
+
+	"golang.org/x/term"
 )
 
 // These are global variables that will be used in multiple functions.
@@ -31,10 +37,50 @@ var JSESSIONID string
 var XSRFTOKEN string
 var reUseBody io.ReadCloser
 
-// These are constants that will be used for logging in to the website.
-var FSusername = "user"
-var FSpassword = "password"
-var FSApplianceFQDN = "appliance.forescout.local"
+// These are constants that will be used for logging in to the website. Create a "helper.yml" and paste in the below data
+// Please encrypt your individual credentials before saving and paste in the 32 bit key below
+// helper:
+//
+//	  username:
+//		 password:
+//		 url:
+var FSusername string
+var FSpassword string
+var FSApplianceFQDN string
+
+// encryption key used to decrypt helper.yml
+// create 'helper.key' file to store appCode. Copy below code format for yml
+// helper:
+//
+//	key: 'fasdfasdfasdfasdf'
+var appCode string
+
+// This function is used to pass encrypted credentials.
+// Don't forget to update the appCode with a new 32 bit string per application.
+func passBall(ct string) string {
+	var plaintext []byte
+	ciphertext, _ := hex.DecodeString(ct)
+	c, err := aes.NewCipher([]byte(appCode))
+	CheckError(err)
+
+	gcm, err := cipher.NewGCM(c)
+	CheckError(err)
+
+	nonceSize := gcm.NonceSize()
+	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
+
+	plaintext, err = gcm.Open(nil, []byte(nonce), []byte(ciphertext), nil)
+	CheckError(err)
+
+	return string(plaintext)
+}
+
+// default error checker. Built in if statement.
+func CheckError(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
 
 // This function is used to remove a given number of lines from a file.
 // fn is the file name, start is the line number to start removing from, and n is the number of lines to remove.
@@ -99,7 +145,7 @@ func skip(b []byte, n int) ([]byte, bool) {
 // This function logs in to the website using the constants defined earlier.
 func FSLogin() {
 	// Start a new headless Chrome browser
-	l := launcher.New().Leakless(false).Headless(true)
+	l := launcher.New().Leakless(false) //.Headless(true)
 	//l = l.Set(flags.ProxyServer, "127.0.0.1:8080")
 	controlURL, _ := l.Launch()
 	ctx := rod.New().ControlURL(controlURL).MustConnect().MustIncognito()
@@ -130,12 +176,13 @@ func FSLogin() {
 	page.MustElement("#username").MustInput(FSusername)
 	page.MustElement("#password").MustInput(FSpassword)
 	page.KeyActions().Press(input.Enter).MustDo()
-	time.Sleep(5 * time.Second)
+	time.Sleep(2 * time.Second)
 	page.MustWaitLoad()
 
 	page.MustElement("body > app-root > main-topbar > nav > ul:nth-child(2) > div:nth-child(2) > li > a").MustClick()
 	page.MustWaitLoad()
-	time.Sleep(5 * time.Second)
+	time.Sleep(2 * time.Second)
+	//fmt.Printf("JSESSIONID: %s\nXSRF: %s\n", JSESSIONID, XSRFTOKEN)
 	page.MustClose()
 	router.MustStop()
 	ctx.MustClose()
@@ -146,44 +193,8 @@ func FSLogin() {
 // This function connects to the configured forescout appliance to ensure connectivity.
 func ConnectTest() bool {
 
-	site := fmt.Sprintf("https://%s/seg/api/v1/environment/configuration", FSApplianceFQDN)
-	method := "GET"
+	body := buildRequest("/seg/api/v1/environment/configuration", "GET")
 
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-
-	client := &http.Client{
-		Transport: transport,
-	}
-
-	req, err := http.NewRequest(method, site, nil)
-
-	if err != nil {
-		fmt.Println(err)
-		return false
-	}
-	req.Header.Add("Host", FSApplianceFQDN)
-	req.Header.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.54 Safari/537.36")
-	req.Header.Add("Accept", "application/json, text/plain, */*")
-	req.Header.Set("referer", fmt.Sprintf("https://%s/forescout-client/", FSApplianceFQDN))
-	user := fmt.Sprintf("%%22%s%%22", FSusername)
-	Cookies := fmt.Sprintf("JSESSIONID=%v; user=%v; XSRF-TOKEN=%v", JSESSIONID, user, XSRFTOKEN)
-	req.Header.Set("Cookie", Cookies)
-	req.Header.Add("Accept-Language", "en-US,en;q=0.9")
-
-	res, err := client.Do(req)
-	if err != nil {
-		fmt.Println(err)
-		return false
-	}
-	defer res.Body.Close()
-
-	body, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		fmt.Println(err)
-		return false
-	}
 	if len(body) == 0 {
 		return false
 	} else {
@@ -194,43 +205,7 @@ func ConnectTest() bool {
 // Get array of destinations zones
 func GetDSTZones(zoneID string) []string {
 	var DSTZones []string
-	site := fmt.Sprintf("https://%s/seg/api/v1/policies/visualization?matrixId=0&srcZoneId=%s", FSApplianceFQDN, zoneID)
-	method := "GET"
-
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-
-	client := &http.Client{
-		Transport: transport,
-	}
-
-	req, err := http.NewRequest(method, site, nil)
-
-	if err != nil {
-		fmt.Println(err)
-		return nil
-	}
-	req.Header.Set("authority", FSApplianceFQDN)
-	req.Header.Set("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36")
-	req.Header.Set("referer", fmt.Sprintf("https://%s/forescout-client/", FSApplianceFQDN))
-	user := fmt.Sprintf("%%22%s%%22", FSusername)
-	Cookies := fmt.Sprintf("JSESSIONID=%v; user=%v; XSRF-TOKEN=%v", JSESSIONID, user, XSRFTOKEN)
-	req.Header.Set("Cookie", Cookies)
-
-	res, err := client.Do(req)
-	if err != nil {
-		fmt.Println(err)
-		return nil
-	}
-	defer res.Body.Close()
-
-	body, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		fmt.Println(err)
-		return nil
-	}
-	fmt.Println(string(body))
+	body := buildRequest("/seg/api/v1/policies/visualization?matrixId=0&srcZoneId="+zoneID, "GET")
 	jsonParsed, err := gabs.ParseJSON(body)
 	if err != nil {
 		panic(err)
@@ -238,15 +213,29 @@ func GetDSTZones(zoneID string) []string {
 	for _, child := range jsonParsed.Children() {
 		DSTZones = append(DSTZones, trimQuote(child.Path("dstZoneId").String()))
 	}
-
 	return DSTZones
 }
 
 // Get array of source zones
 func GetSRCZones(zoneID string) []string {
 	var SRCZones []string
-	site := fmt.Sprintf("https://%s/seg/api/v1/policies/visualization?matrixId=0&dstZoneId=%s", FSApplianceFQDN, zoneID)
-	method := "GET"
+	body := buildRequest("/seg/api/v1/policies/visualization?matrixId=0&dstZoneId="+zoneID, "GET")
+
+	//fmt.Print(body)
+	jsonParsed, err := gabs.ParseJSON(body)
+	if err != nil {
+		panic(err)
+	}
+	for _, child := range jsonParsed.Children() {
+		SRCZones = append(SRCZones, trimQuote(child.Path("srcZoneId").String()))
+	}
+
+	return SRCZones
+}
+
+// build the api request with headers and transport methods and process the response
+func buildRequest(apiUri string, method string) []byte {
+	site := fmt.Sprintf("https://" + FSApplianceFQDN + apiUri)
 
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -273,6 +262,7 @@ func GetSRCZones(zoneID string) []string {
 	req.Header.Set("sec-fetch-dest", "empty")
 	req.Header.Set("referer", fmt.Sprintf("https://%s/forescout-client/", FSApplianceFQDN))
 	req.Header.Set("accept-language", "en-US,en;q=0.9")
+	req.Header.Set("TE", "Trailers")
 	user := fmt.Sprintf("%%22%s%%22", FSusername)
 	Cookies := fmt.Sprintf("JSESSIONID=%v; user=%v; XSRF-TOKEN=%v", JSESSIONID, user, XSRFTOKEN)
 	req.Header.Set("Cookie", Cookies)
@@ -289,55 +279,21 @@ func GetSRCZones(zoneID string) []string {
 		fmt.Println(err)
 		return nil
 	}
-	jsonParsed, err := gabs.ParseJSON(body)
-	if err != nil {
-		panic(err)
-	}
-	for _, child := range jsonParsed.Children() {
-		SRCZones = append(SRCZones, trimQuote(child.Path("srcZoneId").String()))
-	}
-	return SRCZones
+	//fmt.Print(body)
+	//	jsonParsed, err := gabs.ParseJSON(body)
+	//	if err != nil {
+	//panic(err)
+	//	}
+	return body
 }
 
 // Get ID of zone given natural name
 func GetZoneID(zoneName string) string {
+	fmt.Println("Gathering Zone ID for processing")
 	var ZoneID string
 
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-
-	client := &http.Client{
-		Transport: transport,
-	}
-
-	req, err := http.NewRequest("GET", fmt.Sprintf("https://%s/seg/api/v1/zone-map/", FSApplianceFQDN), nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0")
-	req.Header.Set("Accept", "application/json, text/plain, */*")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
-	req.Header.Set("Cache-Control", "no-cache")
-	req.Header.Set("Pragma", "no-cache")
-	req.Header.Set("Expires", "Sat, 01 Jan 2000 00:00:00 GMT")
-	req.Header.Set("Connection", "keep-alive")
-	req.Header.Set("Referer", fmt.Sprintf("https://%s/forescout-client/", FSApplianceFQDN))
-	req.Header.Set("TE", "Trailers")
-	user := fmt.Sprintf("%%22%s%%22", FSusername)
-	Cookies := fmt.Sprintf("JSESSIONID=%v; user=%v; XSRF-TOKEN=%v", JSESSIONID, user, XSRFTOKEN)
-	req.Header.Set("Cookie", Cookies)
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer resp.Body.Close()
-	bodyText, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	jsonParsed, err := gabs.ParseJSON(bodyText)
+	body := buildRequest("/seg/api/v1/zone-map/", "GET")
+	jsonParsed, err := gabs.ParseJSON(body)
 	if err != nil {
 		panic(err)
 	}
@@ -350,6 +306,7 @@ func GetZoneID(zoneName string) string {
 			ZoneID = "No Zone ID Found."
 		}
 	}
+	fmt.Println("Zone ID for " + zoneName + " is " + ZoneID)
 	return ZoneID
 }
 
@@ -366,50 +323,8 @@ func trimQuote(s string) string {
 
 // Check if data exists between source and destination zones. Returns bool and error.
 func CheckOccurrences(SRCZone string, DSTZone string) (bool, error) {
-	site := fmt.Sprintf("https://%s/seg/api/v3/matrix/data/0/occurrences-by-port-range?srcZoneId=%s&dstZoneId=%s&shouldOnlyShowPolicyViolation=false", FSApplianceFQDN, SRCZone, DSTZone)
-	method := "GET"
-
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-
-	client := &http.Client{
-		Transport: transport,
-	}
-
-	req, err := http.NewRequest(method, site, nil)
-
-	if err != nil {
-		fmt.Println(err)
-		return false, err
-	}
-	req.Header.Set("authority", FSApplianceFQDN)
-	req.Header.Set("pragma", "no-cache")
-	req.Header.Set("accept", "application/json, text/plain, */*")
-	req.Header.Set("cache-control", "no-cache")
-	req.Header.Set("sec-ch-ua-mobile", "?0")
-	req.Header.Set("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36")
-	req.Header.Set("sec-fetch-site", "same-origin")
-	req.Header.Set("sec-fetch-mode", "cors")
-	req.Header.Set("sec-fetch-dest", "empty")
-	req.Header.Set("referer", fmt.Sprintf("https://%s/forescout-client/", FSApplianceFQDN))
-	req.Header.Set("accept-language", "en-US,en;q=0.9")
-	user := fmt.Sprintf("%%22%s%%22", FSusername)
-	Cookies := fmt.Sprintf("JSESSIONID=%v; user=%v; XSRF-TOKEN=%v", JSESSIONID, user, XSRFTOKEN)
-	req.Header.Set("Cookie", Cookies)
-
-	res, err := client.Do(req)
-	if err != nil {
-		fmt.Println(err)
-		return false, err
-	}
-	defer res.Body.Close()
-
-	body, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		fmt.Println(err)
-		return false, err
-	}
+	fmt.Println("Checking Occurrences: " + "Source Zone: " + SRCZone + ", Destination Zone: " + DSTZone)
+	body := buildRequest(fmt.Sprintf("/seg/api/v3/matrix/data/0/occurrences-by-port-range?srcZoneId=%s&dstZoneId=%s&shouldOnlyShowPolicyViolation=false", SRCZone, DSTZone), "GET")
 	jsonParsed, err := gabs.ParseJSON(body)
 	if err != nil {
 		panic(err)
@@ -421,42 +336,38 @@ func CheckOccurrences(SRCZone string, DSTZone string) (bool, error) {
 	}
 }
 
-// Drill down the matrix to the bottom most zones given any combination of source and destination zones. Return array of destinations zones.
-func DSTzoneToZoneConnections(SRCZone string, DSTZone string) ([]string, error) {
-	var DSTZones []string
-	site := fmt.Sprintf("https://%s/seg/api/v1/zone-to-zone", FSApplianceFQDN)
-	method := "POST"
-
-	payload := strings.NewReader(fmt.Sprintf(`{"matrixId":"0","srcZoneId":"%s","dstZoneId":"%s","shouldOnlyShowPolicyViolation":false}`, SRCZone, DSTZone))
-
+func buildPostRequest(apiUri string, method string, payload string, compress bool) []byte {
+	site := fmt.Sprintf("https://" + FSApplianceFQDN + apiUri)
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	client := &http.Client{
 		Transport: transport,
 	}
-	req, err := http.NewRequest(method, site, payload)
+	req, err := http.NewRequest(method, site, strings.NewReader(payload))
 
 	if err != nil {
 		fmt.Println(err)
-		return DSTZones, err
+		return nil
 	}
 	req.Header.Add("Host", FSApplianceFQDN)
-	req.Header.Add("Sec-Ch-Ua", "\"Chromium\";v=\"107\", \"Not=A?Brand\";v=\"24\"")
+	//req.Header.Add("Content-Length", "125")
 	req.Header.Add("Accept", "application/json, text/plain, */*")
 	req.Header.Add("Content-Type", "application/json;charset=UTF-8")
 	req.Header.Add("X-Xsrf-Token", XSRFTOKEN)
 	req.Header.Add("Sec-Ch-Ua-Mobile", "?0")
 	req.Header.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.5304.107 Safari/537.36")
-	req.Header.Add("Sec-Ch-Ua-Platform", "\"Windows\"")
-	req.Header.Add("Origin", FSApplianceFQDN)
+	req.Header.Add("Origin", fmt.Sprintf("https://%s", FSApplianceFQDN))
+	req.Header.Set("Referer", fmt.Sprintf("https://%s/forescout-client/", FSApplianceFQDN))
+	req.Header.Add("Accept-Encoding", "gzip, deflate")
+	req.Header.Add("Connection", "close")
+	req.Header.Add("Sec-Ch-Ua", "\"Chromium\";v=\"107\", \"Not=A?Brand\";v=\"24\"")
 	req.Header.Add("Sec-Fetch-Site", "same-origin")
 	req.Header.Add("Sec-Fetch-Mode", "cors")
 	req.Header.Add("Sec-Fetch-Dest", "empty")
-	req.Header.Add("Referer", fmt.Sprintf("https://%s/forescout-client/", FSApplianceFQDN))
-	req.Header.Add("Accept-Encoding", "gzip, deflate")
+	req.Header.Add("Sec-Ch-Ua-Platform", "\"Windows\"")
 	req.Header.Add("Accept-Language", "en-US,en;q=0.9")
-	req.Header.Add("Connection", "close")
+
 	user := fmt.Sprintf("%%22%s%%22", FSusername)
 	Cookies := fmt.Sprintf("JSESSIONID=%v; user=%v; XSRF-TOKEN=%v", JSESSIONID, user, XSRFTOKEN)
 	req.Header.Set("Cookie", Cookies)
@@ -464,22 +375,36 @@ func DSTzoneToZoneConnections(SRCZone string, DSTZone string) ([]string, error) 
 	res, err := client.Do(req)
 	if err != nil {
 		fmt.Println(err)
-		return DSTZones, err
+		return nil
 	}
 	defer res.Body.Close()
-	// Create a new gzip reader for the response body
+
 	gzr, err := gzip.NewReader(res.Body)
 	if err != nil {
 		fmt.Println(err)
-		return DSTZones, err
+		return nil
 	}
-
 	// Read the decompressed response body into memory
 	body, err := ioutil.ReadAll(gzr)
 	if err != nil {
 		fmt.Println(err)
-		return DSTZones, err
+		return nil
 	}
+
+	//fmt.Print(body)
+	//	jsonParsed, err := gabs.ParseJSON(body)
+	//	if err != nil {
+	//panic(err)
+	//	}
+	return body
+}
+
+// Drill down the matrix to the bottom most zones given any combination of source and destination zones. Return array of destinations zones.
+func DSTzoneToZoneConnections(SRCZone string, DSTZone string) ([]string, error) {
+	fmt.Println("Reading DST Zone to Zone Connections")
+	var DSTZones []string
+
+	body := buildPostRequest("/seg/api/v1/zone-to-zone", "POST", fmt.Sprintf(`{"matrixId":"0","srcZoneId":"%s","dstZoneId":"%s","shouldOnlyShowPolicyViolation":false}`, SRCZone, DSTZone), true)
 
 	// Parse the JSON response
 	jsonParsed, err := gabs.ParseJSON(body)
@@ -494,64 +419,10 @@ func DSTzoneToZoneConnections(SRCZone string, DSTZone string) ([]string, error) 
 
 // Drill down the matrix to the bottom most zones given any combination of source and destination zones. Return array of source zones.
 func SRCzoneToZoneConnections(SRCZone string, DSTZone string) ([]string, error) {
+	fmt.Println("Reading SRC Zone to Zone Connections")
 	var SRCZones []string
-	site := fmt.Sprintf("https://%s/seg/api/v1/zone-to-zone", FSApplianceFQDN)
-	method := "POST"
 
-	payload := strings.NewReader(fmt.Sprintf(`{"matrixId":"0","srcZoneId":"%s","dstZoneId":"%s","shouldOnlyShowPolicyViolation":false}`, SRCZone, DSTZone))
-
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-	client := &http.Client{
-		Transport: transport,
-	}
-	req, err := http.NewRequest(method, site, payload)
-
-	if err != nil {
-		fmt.Println(err)
-		return SRCZones, err
-	}
-	req.Header.Add("Host", FSApplianceFQDN)
-	req.Header.Add("Sec-Ch-Ua", "\"Chromium\";v=\"107\", \"Not=A?Brand\";v=\"24\"")
-	req.Header.Add("Accept", "application/json, text/plain, */*")
-	req.Header.Add("Content-Type", "application/json;charset=UTF-8")
-	req.Header.Add("X-Xsrf-Token", XSRFTOKEN)
-	req.Header.Add("Sec-Ch-Ua-Mobile", "?0")
-	req.Header.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.5304.107 Safari/537.36")
-	req.Header.Add("Sec-Ch-Ua-Platform", "\"Windows\"")
-	req.Header.Add("Origin", FSApplianceFQDN)
-	req.Header.Add("Sec-Fetch-Site", "same-origin")
-	req.Header.Add("Sec-Fetch-Mode", "cors")
-	req.Header.Add("Sec-Fetch-Dest", "empty")
-	req.Header.Add("Referer", fmt.Sprintf("https://%s/forescout-client/", FSApplianceFQDN))
-	req.Header.Add("Accept-Encoding", "gzip, deflate")
-	req.Header.Add("Accept-Language", "en-US,en;q=0.9")
-	req.Header.Add("Connection", "close")
-	user := fmt.Sprintf("%%22%s%%22", FSusername)
-	Cookies := fmt.Sprintf("JSESSIONID=%v; user=%v; XSRF-TOKEN=%v", JSESSIONID, user, XSRFTOKEN)
-	req.Header.Set("Cookie", Cookies)
-
-	res, err := client.Do(req)
-	if err != nil {
-		fmt.Println(err)
-		return SRCZones, err
-	}
-	defer res.Body.Close()
-
-	// Create a new gzip reader for the response body
-	gzr, err := gzip.NewReader(res.Body)
-	if err != nil {
-		fmt.Println(err)
-		return SRCZones, err
-	}
-
-	// Read the decompressed response body into memory
-	body, err := ioutil.ReadAll(gzr)
-	if err != nil {
-		fmt.Println(err)
-		return SRCZones, err
-	}
+	body := buildPostRequest("/seg/api/v1/zone-to-zone", "POST", fmt.Sprintf(`{"matrixId":"0","srcZoneId":"%s","dstZoneId":"%s","shouldOnlyShowPolicyViolation":false}`, SRCZone, DSTZone), true)
 
 	// Parse the JSON response
 	jsonParsed, err := gabs.ParseJSON(body)
@@ -595,6 +466,7 @@ func ExportData(SRCZone string, DSTZone string) {
 	req.Header.Add("Sec-Fetch-Mode", "cors")
 	req.Header.Add("Sec-Fetch-Dest", "empty")
 	req.Header.Set("referer", fmt.Sprintf("https://%s/forescout-client/", FSApplianceFQDN))
+	//req.Header.Add("Accept-Encoding", "gzip, deflate")
 	req.Header.Add("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Add("Connection", "close")
 	user := fmt.Sprintf("%%22%s%%22", FSusername)
@@ -640,50 +512,10 @@ func ExportData(SRCZone string, DSTZone string) {
 
 // Search back the number of days by given int. Default is 3 day lookback
 func timeBasedFilter(days int) {
+	fmt.Println("Applying filter based on days specified")
+	body := buildPostRequest("/seg/api/v1/user/configuration/timeBasedFilter", "PUT", fmt.Sprintf("{\"lastDaysFilter\":%d}", days), false)
 
-	site := fmt.Sprintf("https://%s/seg/api/v1/user/configuration/timeBasedFilter", FSApplianceFQDN)
-	method := "PUT"
-
-	payload := strings.NewReader(fmt.Sprintf("{\"lastDaysFilter\":%d}", days))
-
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-
-	client := &http.Client{
-		Transport: transport,
-	}
-	req, err := http.NewRequest(method, site, payload)
-
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	req.Header.Add("Host", FSApplianceFQDN)
-	req.Header.Add("X-Xsrf-Token", XSRFTOKEN)
-	req.Header.Add("Sec-Ch-Ua-Mobile", "?0")
-	req.Header.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.54 Safari/537.36")
-	req.Header.Add("Content-Type", "application/json")
-	req.Header.Add("Accept", "application/json, text/plain, */*")
-	req.Header.Add("Origin", fmt.Sprintf("https://%s", FSApplianceFQDN))
-	req.Header.Set("referer", fmt.Sprintf("https://%s/forescout-client/", FSApplianceFQDN))
-	user := fmt.Sprintf("%%22%s%%22", FSusername)
-	Cookies := fmt.Sprintf("JSESSIONID=%v; user=%v; XSRF-TOKEN=%v", JSESSIONID, user, XSRFTOKEN)
-	req.Header.Set("Cookie", Cookies)
-
-	res, err := client.Do(req)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	defer res.Body.Close()
-
-	body, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	fmt.Sprintln(string(body))
+	fmt.Println(string(body))
 }
 
 // Clear any filter or time range from previous sessions
@@ -702,6 +534,7 @@ func ClearFilter() {
 	method := "POST"
 
 	payload := strings.NewReader(`{"srcZones":[],"dstZones":[],"services":[],"protocols":[],"isExclude":false,"filterEnabled":false,"hasFilters":true,"srcIp":"","dstIp":"","timeRangeFilter":null}`)
+
 	req, err := http.NewRequest(method, url, payload)
 
 	if err != nil {
@@ -716,6 +549,8 @@ func ClearFilter() {
 	req.Header.Add("Accept", "application/json, text/plain, */*")
 	req.Header.Add("Origin", fmt.Sprintf("https://%s", FSApplianceFQDN))
 	req.Header.Set("referer", fmt.Sprintf("https://%s/forescout-client/", FSApplianceFQDN))
+	//req.Header.Add("Accept-Encoding", "gzip, deflate")
+	//req.Header.Add("Accept-Language", "en-US,en;q=0.9")
 	user := fmt.Sprintf("%%22%s%%22", FSusername)
 	Cookies := fmt.Sprintf("JSESSIONID=%v; user=%v; XSRF-TOKEN=%v", JSESSIONID, user, XSRFTOKEN)
 	req.Header.Set("Cookie", Cookies)
@@ -726,7 +561,6 @@ func ClearFilter() {
 		return
 	}
 	defer res.Body.Close()
-
 }
 
 // Securely prompt for password in the cli
@@ -750,6 +584,23 @@ func StringPrompt(label string) string {
 }
 
 func main() {
+
+	viper.AddConfigPath(".")
+	viper.SetConfigName("key") // Register config file name (no extension)
+	viper.SetConfigType("yml") // Look for specific type
+	var err = viper.ReadInConfig()
+	CheckError(err)
+
+	appCode = viper.GetString("helper.key")
+
+	viper.SetConfigName("helper") // Change file and reread contents.
+	err = viper.ReadInConfig()
+	CheckError(err)
+
+	FSusername = passBall(viper.GetString("helper.username"))
+	FSpassword = passBall(viper.GetString("helper.password"))
+	FSApplianceFQDN = viper.GetString("helper.url")
+
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	GetDSTZonesFlag := flag.Bool("d", false, "Get all destination zones from selected source.")
 	GetSRCZonesFlag := flag.Bool("s", false, "Get all source zones from selected destination.")
@@ -763,6 +614,7 @@ func main() {
 	password := flag.String("p", "", "Specify password to connect to server with. Will use embedded password if configured.")
 	server := flag.String("fS", FSApplianceFQDN, "Specify server to connect to. Will use embedded FQDN if configured.")
 	flag.Parse()
+
 	if FSApplianceFQDN == "" || FSusername == "" || FSpassword == "" {
 		if *username == "" && FSusername == "" {
 			if FSusername == "" && *username != "" {
@@ -797,6 +649,7 @@ func main() {
 		flag.PrintDefaults()
 		return
 	} else {
+		fmt.Println("Attempting connection to your local forescout instance via " + FSApplianceFQDN + ". Please wait.....")
 		FSLogin()
 		if ConnectTest() {
 			fmt.Printf("Successfully logged into %s\n", FSApplianceFQDN)
@@ -804,14 +657,13 @@ func main() {
 			fmt.Printf("Could not login to %s: \n This could be due to incorrect credentials, or it could not connect to the server.", FSApplianceFQDN)
 			return
 		}
-		ClearFilter()
-		timeBasedFilter(*timeFilter)
 		check := GetZoneID(*ZoneName)
 		if check == "No Zone ID Found." {
 			fmt.Println(check)
 			return
 		}
-
+		ClearFilter()
+		timeBasedFilter(*timeFilter)
 		if *GetSRCZonesFlag {
 			fmt.Println(GetSRCZones(GetZoneID(*ZoneName)))
 		} else if *GetDSTZonesFlag {
@@ -848,6 +700,7 @@ func main() {
 			var SRCZoneCollection []string
 			DSTZone := GetZoneID(*ZoneName)
 			dir := fmt.Sprintf("Connections made to %s", *ZoneName)
+			fmt.Println("Creating Directory of Connections")
 			os.Mkdir(dir, 0600)
 			os.Chdir(dir)
 			SRCZones := GetSRCZones(DSTZone)
@@ -866,6 +719,7 @@ func main() {
 				bar.Increment()
 			}
 			time.Sleep(1 * time.Second)
+
 			fmt.Printf("\nData successfully exported to \"%s\"", dir)
 		} else {
 			flag.PrintDefaults()
