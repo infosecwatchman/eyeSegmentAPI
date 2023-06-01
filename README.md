@@ -18,6 +18,25 @@ There are 3 constants (FSusername, FSpassword, and FSApplianceFQDN) that need to
 
 - FSApplianceFQDN: Fully qualified domain name of the Appliance you are connecting. Since the API is calling the data stored in the cloud, we need to use the Enterprise Manager to pull this information.
 
+    #### Optional - Encrypt your stored credentials
+
+    For this method you'll need to add 2 custom files *helper.yml* and *key.yml*. You will not need to modify the existing source code for this method to work. In the current implementation both the username and password are encrypted with the same private key.
+    
+    NOTE: You can easily generate a private key and encrypted strings through the [aesGenerate32](https://github.com/Rldeckard/aesGenerate32) repository using [this application](https://github.com/Rldeckard/aesGenerate32/blob/7c9674d6244f073f3dfc5d8414eb0f8dbb1c2020/aesGenerate.exe)
+
+    helper.yml
+    ```
+    helper:
+      username:
+      password:
+      url:
+    ```
+    key.yml
+    ```
+    helper:
+      key:
+    ```
+
 ### Build the application
 
 From the folder this was downloaded from execute the command: `go build -ldflags="-s -w" .` which will build everything
