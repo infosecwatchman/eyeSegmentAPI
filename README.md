@@ -68,4 +68,4 @@ The following commands can be used with eyeSegmentAPI.exe
 
 - -t flag to test functions
 
-- u string Specify username to connect to servier with. Will use embedded username
+- -u string Specify username to connect to servier with. Will use embedded username

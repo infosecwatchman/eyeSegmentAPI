@@ -78,7 +78,7 @@ func passBall(ct string) string {
 // default error checker. Built in if statement.
 func CheckError(err error) {
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 }
 
@@ -207,7 +207,7 @@ func GetDSTZones(zoneID string) []string {
 	body := buildRequest(fmt.Sprintf("/seg/api/v1/policies/visualization?matrixId=0&srcZoneId=%s", zoneID), http.MethodGet)
 	jsonParsed, err := gabs.ParseJSON(body)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	for _, child := range jsonParsed.Children() {
 		DSTZones = append(DSTZones, trimQuote(child.Path("dstZoneId").String()))
@@ -218,11 +218,11 @@ func GetDSTZones(zoneID string) []string {
 // Get array of source zones
 func GetSRCZones(zoneID string) []string {
 	var SRCZones []string
-	body := buildRequest(fmt.Sprintf("/seg/api/v1/policies/visualization?matrixId=0&dstZoneId=%s",zoneID), http.MethodGet)
+	body := buildRequest(fmt.Sprintf("/seg/api/v1/policies/visualization?matrixId=0&dstZoneId=%s", zoneID), http.MethodGet)
 
 	jsonParsed, err := gabs.ParseJSON(body)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	for _, child := range jsonParsed.Children() {
 		SRCZones = append(SRCZones, trimQuote(child.Path("srcZoneId").String()))
@@ -286,7 +286,7 @@ func GetZoneID(zoneName string) string {
 	body := buildRequest("/seg/api/v1/zone-map/", http.MethodGet)
 	jsonParsed, err := gabs.ParseJSON(body)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	for _, zone := range jsonParsed.Path("zones").Children() {
 		parsedZoneName := trimQuote(zone.Search("name").String())
@@ -318,7 +318,7 @@ func CheckOccurrences(SRCZone string, DSTZone string) (bool, error) {
 	body := buildRequest(fmt.Sprintf("/seg/api/v3/matrix/data/0/occurrences-by-port-range?srcZoneId=%s&dstZoneId=%s&shouldOnlyShowPolicyViolation=false", SRCZone, DSTZone), http.MethodGet)
 	jsonParsed, err := gabs.ParseJSON(body)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	if len(jsonParsed.Children()) == 0 {
 		return false, nil
@@ -329,13 +329,14 @@ func CheckOccurrences(SRCZone string, DSTZone string) (bool, error) {
 
 func buildPostRequest(apiUri string, method string, payload string, DisableCompress bool) []byte {
 	site := fmt.Sprintf("https://" + FSApplianceFQDN + apiUri)
+	var transport *http.Transport
 	if !DisableCompress {
-		transport := &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		transport = &http.Transport{
+			TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},
 			DisableCompression: true,
 		}
 	} else {
-		transport := &http.Transport{
+		transport = &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
 	}
@@ -393,7 +394,7 @@ func buildPostRequest(apiUri string, method string, payload string, DisableCompr
 
 // Drill down the matrix to the bottom most zones given any combination of source and destination zones. Return array of destinations zones.
 func DSTzoneToZoneConnections(SRCZone string, DSTZone string) ([]string, error) {
-	fmt.Println("Reading DST Zone to Zone Connections")
+	//fmt.Println("Reading DST Zone to Zone Connections")
 	var DSTZones []string
 
 	body := buildPostRequest("/seg/api/v1/zone-to-zone", http.MethodPost, fmt.Sprintf(`{"matrixId":"0","srcZoneId":"%s","dstZoneId":"%s","shouldOnlyShowPolicyViolation":false}`, SRCZone, DSTZone), false)
@@ -401,7 +402,7 @@ func DSTzoneToZoneConnections(SRCZone string, DSTZone string) ([]string, error) 
 	// Parse the JSON response
 	jsonParsed, err := gabs.ParseJSON(body)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	for _, child := range jsonParsed.Path("zoneToZoneConnections").Children() {
 		DSTZones = append(DSTZones, trimQuote(child.Path("dstZoneId").String()))
@@ -411,7 +412,7 @@ func DSTzoneToZoneConnections(SRCZone string, DSTZone string) ([]string, error) 
 
 // Drill down the matrix to the bottom most zones given any combination of source and destination zones. Return array of source zones.
 func SRCzoneToZoneConnections(SRCZone string, DSTZone string) ([]string, error) {
-	fmt.Println("Reading SRC Zone to Zone Connections")
+	//fmt.Println("Reading SRC Zone to Zone Connections")
 	var SRCZones []string
 
 	body := buildPostRequest("/seg/api/v1/zone-to-zone", http.MethodPost, fmt.Sprintf(`{"matrixId":"0","srcZoneId":"%s","dstZoneId":"%s","shouldOnlyShowPolicyViolation":false}`, SRCZone, DSTZone), false)
@@ -419,7 +420,7 @@ func SRCzoneToZoneConnections(SRCZone string, DSTZone string) ([]string, error) 
 	// Parse the JSON response
 	jsonParsed, err := gabs.ParseJSON(body)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	for _, child := range jsonParsed.Path("zoneToZoneConnections").Children() {
 		SRCZones = append(SRCZones, trimQuote(child.Path("srcZoneId").String()))
@@ -503,17 +504,53 @@ func ExportData(SRCZone string, DSTZone string) {
 
 // Search back the number of days by given int. Default is 3 day lookback
 func timeBasedFilter(days int) {
-	fmt.Println("Applying filter based on days specified")
-	body := buildPostRequest("/seg/api/v1/user/configuration/timeBasedFilter", http.MethodPost, fmt.Sprintf("{\"lastDaysFilter\":%d}", days), false)
-
-	fmt.Println(string(body))
+	//fmt.Println("Applying filter based on days specified")
+	//body := buildPostRequest("/seg/api/v1/user/configuration/timeBasedFilter", http.MethodPut, fmt.Sprintf("{\"lastDaysFilter\":%d}", days), false)
+	buildPostRequest("/seg/api/v1/user/configuration/timeBasedFilter", http.MethodPut, fmt.Sprintf("{\"lastDaysFilter\":%d}", days), false)
+	//fmt.Println(string(body))
 }
 
 // Clear any filter or time range from previous sessions
 func ClearFilter() {
 
-	buildPostRequest("/seg/api/v2/filter", http.MethodPut, `{"srcZones":[],"dstZones":[],"services":[],"protocols":[],"isExclude":false,"filterEnabled":false,"hasFilters":true,"srcIp":"","dstIp":"","timeRangeFilter":null}`, true)
+	transport := &http.Transport{
+		TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},
+		DisableCompression: true,
+	}
 
+	client := &http.Client{
+		Transport: transport,
+	}
+
+	url := fmt.Sprintf("https://%s/seg/api/v2/filter", FSApplianceFQDN)
+	method := "POST"
+
+	payload := strings.NewReader(`{"srcZones":[],"dstZones":[],"services":[],"protocols":[],"isExclude":false,"filterEnabled":false,"hasFilters":true,"srcIp":"","dstIp":"","timeRangeFilter":null}`)
+
+	req, err := http.NewRequest(method, url, payload)
+
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	req.Header.Add("Host", FSApplianceFQDN)
+	req.Header.Add("X-Xsrf-Token", XSRFTOKEN)
+	req.Header.Add("Sec-Ch-Ua-Mobile", "?0")
+	req.Header.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.54 Safari/537.36")
+	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("Accept", "application/json, text/plain, */*")
+	req.Header.Add("Origin", fmt.Sprintf("https://%s", FSApplianceFQDN))
+	req.Header.Set("referer", fmt.Sprintf("https://%s/forescout-client/", FSApplianceFQDN))
+	user := fmt.Sprintf("%%22%s%%22", FSusername)
+	Cookies := fmt.Sprintf("JSESSIONID=%v; user=%v; XSRF-TOKEN=%v", JSESSIONID, user, XSRFTOKEN)
+	req.Header.Set("Cookie", Cookies)
+
+	res, err := client.Do(req)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	defer res.Body.Close()
 }
 
 // Securely prompt for password in the cli
@@ -536,14 +573,15 @@ func StringPrompt(label string) string {
 	return strings.TrimSpace(s)
 }
 
-func main() {
-
+func GetCredentialsFromFiles() bool {
 	viper.AddConfigPath(".")
 	viper.SetConfigName("key") // Register config file name (no extension)
 	viper.SetConfigType("yml") // Look for specific type
 	var err = viper.ReadInConfig()
-	CheckError(err)
-
+	//CheckError(err)
+	if err != nil {
+		return false
+	}
 	appCode = viper.GetString("helper.key")
 
 	viper.SetConfigName("helper") // Change file and reread contents.
@@ -553,8 +591,12 @@ func main() {
 	FSusername = passBall(viper.GetString("helper.username"))
 	FSpassword = passBall(viper.GetString("helper.password"))
 	FSApplianceFQDN = viper.GetString("helper.url")
+	return true
+}
 
+func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
 	GetDSTZonesFlag := flag.Bool("d", false, "Get all destination zones from selected source.")
 	GetSRCZonesFlag := flag.Bool("s", false, "Get all source zones from selected destination.")
 	CheckZoneID := flag.Bool("c", false, "Print Zone ID from given name.")
@@ -568,6 +610,7 @@ func main() {
 	server := flag.String("fS", FSApplianceFQDN, "Specify server to connect to. Will use embedded FQDN if configured.")
 	flag.Parse()
 
+	GetCredentialsFromFiles()
 	if FSApplianceFQDN == "" || FSusername == "" || FSpassword == "" {
 		if *username == "" && FSusername == "" {
 			if FSusername == "" && *username != "" {
@@ -618,13 +661,13 @@ func main() {
 		ClearFilter()
 		timeBasedFilter(*timeFilter)
 		if *GetSRCZonesFlag {
-			fmt.Println(GetSRCZones(GetZoneID(*ZoneName)))
+			fmt.Println(GetSRCZones(check))
 		} else if *GetDSTZonesFlag {
-			fmt.Println(GetDSTZones(GetZoneID(*ZoneName)))
+			fmt.Println(GetDSTZones(check))
 		} else if *CheckZoneID {
-			fmt.Println(GetZoneID(*ZoneName))
+			fmt.Println(check)
 		} else if *exportDSTDataFlag {
-			SRCZone := GetZoneID(*ZoneName)
+			SRCZone := check
 			var DSTZonesWData []string
 			var DSTZonesCollection []string
 			dir := fmt.Sprintf("Connections made from %s", *ZoneName)
@@ -651,7 +694,7 @@ func main() {
 		} else if *exportSRCDataFlag {
 			var SRCZonesWData []string
 			var SRCZoneCollection []string
-			DSTZone := GetZoneID(*ZoneName)
+			DSTZone := check
 			dir := fmt.Sprintf("Connections made to %s", *ZoneName)
 			fmt.Println("Creating Directory of Connections")
 			os.Mkdir(dir, 0600)
