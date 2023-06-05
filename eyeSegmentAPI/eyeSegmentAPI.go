@@ -533,6 +533,22 @@ func ClearFilter() {
 	buildPostRequest("/seg/api/v2/filter", http.MethodPost, `{"srcZones":[],"dstZones":[],"services":[],"protocols":[],"isExclude":false,"filterEnabled":false,"hasFilters":true,"srcIp":"","dstIp":"","timeRangeFilter":null}`, true)
 }
 
+// GetFilter : Get current filter settings
+func GetFilter() string {
+	return string(buildRequest("/seg/api/v2/filter", http.MethodGet))
+}
+
+// SetFilter : Set filter for matrix
+// Example payload: ({"srcZones":[""],"dstZones":[""],"services":[],"isExclude":false,"protocols":[],"srcIp":"","dstIp":"","hasFilters":true,"filterEnabled":true,"confidence":null})
+func SetFilter(filterPayload string) string {
+	return string(buildPostRequest("/seg/api/v2/filter", http.MethodPost, filterPayload, false))
+}
+
+// GetMatrixData : Get all data in Matrix (best used with SetFilter).
+func GetMatrixData() []byte {
+	return buildRequest("/seg/api/v2/matrix/data/0/traffic?shouldOnlyShowPolicyViolation=false", http.MethodGet)
+}
+
 // StringPrompt : Securely prompt for password in the cli
 func StringPrompt(label string) string {
 	var s string
