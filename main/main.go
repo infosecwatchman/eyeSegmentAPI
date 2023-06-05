@@ -24,8 +24,12 @@ func main() {
 	username := flag.String("u", "", "Specify username to connect to server with. Will use embedded username if configured.")
 	password := flag.String("p", "", "Specify password to connect to server with. Will use embedded password if configured.")
 	server := flag.String("fS", eyeSegmentAPI.FSApplianceFQDN, "Specify server to connect to. Will use embedded FQDN if configured.")
+	helppage := flag.Bool("h", false, "Displays this help page.")
 	flag.Parse()
 
+	if *helppage {
+		flag.PrintDefaults()
+	}
 	eyeSegmentAPI.GetCredentialsFromFiles()
 	if eyeSegmentAPI.FSApplianceFQDN == "" || eyeSegmentAPI.FSusername == "" || eyeSegmentAPI.FSpassword == "" {
 		if *username == "" && eyeSegmentAPI.FSusername == "" {
@@ -87,8 +91,14 @@ func main() {
 			var DSTZonesWData []string
 			var DSTZonesCollection []string
 			dir := fmt.Sprintf("Connections made from %s", *ZoneName)
-			os.Mkdir(dir, 0600)
-			os.Chdir(dir)
+			err := os.Mkdir(dir, 0600)
+			if err != nil {
+				log.Fatal(err)
+			}
+			err = os.Chdir(dir)
+			if err != nil {
+				log.Fatal(err)
+			}
 			DSTZones := eyeSegmentAPI.GetDSTZones(SRCZone)
 			for _, DSTZone := range DSTZones {
 				val, _ := eyeSegmentAPI.CheckOccurrences(SRCZone, DSTZone)
@@ -101,7 +111,7 @@ func main() {
 			}
 			bar := pb.StartNew(len(DSTZonesCollection))
 			for _, DSTZone := range DSTZonesCollection {
-				eyeSegmentAPI.ExportData(SRCZone, DSTZone)
+				eyeSegmentAPI.ExportCSVData(SRCZone, DSTZone)
 				bar.Increment()
 			}
 			time.Sleep(1 * time.Second)
@@ -113,8 +123,14 @@ func main() {
 			DSTZone := check
 			dir := fmt.Sprintf("Connections made to %s", *ZoneName)
 			fmt.Println("Creating Directory of Connections")
-			os.Mkdir(dir, 0600)
-			os.Chdir(dir)
+			err := os.Mkdir(dir, 0600)
+			if err != nil {
+				log.Fatal(err)
+			}
+			err = os.Chdir(dir)
+			if err != nil {
+				log.Fatal(err)
+			}
 			SRCZones := eyeSegmentAPI.GetSRCZones(DSTZone)
 			for _, SRCZone := range SRCZones {
 				val, _ := eyeSegmentAPI.CheckOccurrences(SRCZone, DSTZone)
@@ -127,7 +143,7 @@ func main() {
 			}
 			bar := pb.StartNew(len(SRCZoneCollection))
 			for _, SRCZone := range SRCZoneCollection {
-				eyeSegmentAPI.ExportData(SRCZone, DSTZone)
+				eyeSegmentAPI.ExportCSVData(SRCZone, DSTZone)
 				bar.Increment()
 			}
 			time.Sleep(1 * time.Second)
