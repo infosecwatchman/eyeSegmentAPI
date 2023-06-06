@@ -10,9 +10,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/go-rod/rod/lib/launcher/flags"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -45,6 +47,7 @@ var (
 	JSESSIONID      string
 	XSRFTOKEN       string
 	reUseBody       io.ReadCloser
+	ProxyAddress    string
 )
 
 // encryption key used to decrypt helper.yml
@@ -146,6 +149,9 @@ func FSLogin() {
 	// Start a new headless Chrome browser
 	l := launcher.New().Leakless(false).Headless(true)
 	//l = l.Set(flags.ProxyServer, "127.0.0.1:8080")
+	if ProxyAddress != "" {
+		l = l.Set(flags.ProxyServer, strings.ReplaceAll(ProxyAddress, "http.*?//", ""))
+	}
 	controlURL, _ := l.Launch()
 	ctx := rod.New().ControlURL(controlURL).MustConnect().MustIncognito()
 	ctx.MustIgnoreCertErrors(true)
@@ -233,9 +239,15 @@ func GetSRCZones(zoneID string) []string {
 // Build the api request with headers and transport methods and process the response
 func buildRequest(apiUri string, method string) []byte {
 	site := fmt.Sprintf("https://" + FSApplianceFQDN + apiUri)
-
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	if ProxyAddress != "" {
+		proxyURL, err := url.Parse(ProxyAddress)
+		if err != nil {
+			log.Println(err)
+		}
+		transport.Proxy = http.ProxyURL(proxyURL)
 	}
 
 	client := &http.Client{
@@ -271,68 +283,21 @@ func buildRequest(apiUri string, method string) []byte {
 	return body
 }
 
-// GetZoneID : Get ID of zone given natural name
-func GetZoneID(zoneName string) string {
-	fmt.Println("Gathering Zone ID for processing")
-	var ZoneID string
-
-	body := buildRequest("/seg/api/v1/zone-map/", http.MethodGet)
-	jsonParsed, err := gabs.ParseJSON(body)
-	if err != nil {
-		log.Fatal(err)
-	}
-	for _, zone := range jsonParsed.Path("zones").Children() {
-		parsedZoneName := trimQuote(zone.Search("name").String())
-		if strings.EqualFold(parsedZoneName, zoneName) {
-			ZoneID = trimQuote(zone.Search("zoneId").String())
-			break
-		} else {
-			ZoneID = "No Zone ID Found."
-		}
-	}
-	fmt.Println("Zone ID for " + zoneName + " is " + ZoneID)
-	return ZoneID
-}
-
-// Remove the beginning and ending quotes of given string
-func trimQuote(s string) string {
-	if len(s) > 0 && s[0] == '"' {
-		s = s[1:]
-	}
-	if len(s) > 0 && s[len(s)-1] == '"' {
-		s = s[:len(s)-1]
-	}
-	return s
-}
-
-// CheckOccurrences : Check if data exists between source and destination zones. Returns bool and error.
-func CheckOccurrences(SRCZone string, DSTZone string) (bool, error) {
-	fmt.Println("Checking Occurrences: " + "Source Zone: " + SRCZone + ", Destination Zone: " + DSTZone)
-	body := buildRequest(fmt.Sprintf("/seg/api/v3/matrix/data/0/occurrences-by-port-range?srcZoneId=%s&dstZoneId=%s&shouldOnlyShowPolicyViolation=false", SRCZone, DSTZone), http.MethodGet)
-	jsonParsed, err := gabs.ParseJSON(body)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if len(jsonParsed.Children()) == 0 {
-		return false, nil
-	} else {
-		return true, nil
-	}
-}
-
 // Function to build Post Request from given endpoint path, method (ie. POST, PUT), payload, and compression bool
 func buildPostRequest(apiUri string, method string, payload string, DisableCompress bool) []byte {
 	site := fmt.Sprintf("https://" + FSApplianceFQDN + apiUri)
-	var transport *http.Transport
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
 	if !DisableCompress {
-		transport = &http.Transport{
-			TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},
-			DisableCompression: true,
+		transport.DisableCompression = true
+	}
+	if ProxyAddress != "" {
+		proxyURL, err := url.Parse(ProxyAddress)
+		if err != nil {
+			log.Println(err)
 		}
-	} else {
-		transport = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
+		transport.Proxy = http.ProxyURL(proxyURL)
 	}
 	client := &http.Client{
 		Transport: transport,
@@ -385,6 +350,55 @@ func buildPostRequest(apiUri string, method string, payload string, DisableCompr
 	}
 
 	return body
+}
+
+// GetZoneID : Get ID of zone given natural name
+func GetZoneID(zoneName string) string {
+	fmt.Println("Gathering Zone ID for processing")
+	var ZoneID string
+
+	body := buildRequest("/seg/api/v1/zone-map/", http.MethodGet)
+	jsonParsed, err := gabs.ParseJSON(body)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, zone := range jsonParsed.Path("zones").Children() {
+		parsedZoneName := trimQuote(zone.Search("name").String())
+		if strings.EqualFold(parsedZoneName, zoneName) {
+			ZoneID = trimQuote(zone.Search("zoneId").String())
+			break
+		} else {
+			ZoneID = "No Zone ID Found."
+		}
+	}
+	fmt.Println("Zone ID for " + zoneName + " is " + ZoneID)
+	return ZoneID
+}
+
+// Remove the beginning and ending quotes of given string
+func trimQuote(s string) string {
+	if len(s) > 0 && s[0] == '"' {
+		s = s[1:]
+	}
+	if len(s) > 0 && s[len(s)-1] == '"' {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+// CheckOccurrences : Check if data exists between source and destination zones. Returns bool and error.
+func CheckOccurrences(SRCZone string, DSTZone string) (bool, error) {
+	fmt.Println("Checking Occurrences: " + "Source Zone: " + SRCZone + ", Destination Zone: " + DSTZone)
+	body := buildRequest(fmt.Sprintf("/seg/api/v3/matrix/data/0/occurrences-by-port-range?srcZoneId=%s&dstZoneId=%s&shouldOnlyShowPolicyViolation=false", SRCZone, DSTZone), http.MethodGet)
+	jsonParsed, err := gabs.ParseJSON(body)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if len(jsonParsed.Children()) == 0 {
+		return false, nil
+	} else {
+		return true, nil
+	}
 }
 
 // DSTzoneToZoneConnections : Drill down the matrix to the bottom most zones given any combination of source and destination zones. Return array of destinations zones.
@@ -546,7 +560,7 @@ func SetFilter(filterPayload string) string {
 
 // GetMatrixData : Get all data in Matrix (best used with SetFilter).
 func GetMatrixData() []byte {
-	return buildRequest("/seg/api/v2/matrix/data/0/traffic?shouldOnlyShowPolicyViolation=false", http.MethodGet)
+	return buildPostRequest("/seg/api/v1/matrix-overview/", http.MethodPost, `{"matrixId":"0","shouldOnlyShowPolicyViolation":false}`, true)
 }
 
 // StringPrompt : Securely prompt for password in the cli

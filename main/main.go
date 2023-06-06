@@ -25,6 +25,7 @@ func main() {
 	password := flag.String("p", "", "Specify password to connect to server with. Will use embedded password if configured.")
 	server := flag.String("fS", eyeSegmentAPI.FSApplianceFQDN, "Specify server to connect to. Will use embedded FQDN if configured.")
 	helppage := flag.Bool("h", false, "Displays this help page.")
+	proxy := flag.String("proxy", "", "Proxy address")
 	flag.Parse()
 
 	if *helppage {
@@ -58,6 +59,7 @@ func main() {
 		}
 	}
 
+	eyeSegmentAPI.ProxyAddress = *proxy
 	if *test {
 		return
 	} else if *ZoneName == "" {
