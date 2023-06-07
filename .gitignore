@@ -7,19 +7,24 @@
 
 # Test binary, built with `go test -c`
 *.test
+main/*.test
 
 # Ignore Credential files
 *.yml
+main/*.yml
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
+main/*.out
 
 # Ignore local builds
 *.exe
+main/*.exe
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
 Connections*/
+main/Connections*/
 src/*
 buildnotes.txt
-testing.go
+main/testing*
